@@ -154,6 +154,48 @@
             text-align: center;
         }
 
+        .packet-diagram {
+            display: flex;
+            width: 100%;
+            border-radius: 8px;
+            overflow: hidden;
+            border: 1px solid var(--border-color);
+            margin: 2rem 0;
+            font-family: 'Fira Code', monospace;
+            font-size: 0.85rem;
+        }
+
+        .packet-field {
+            padding: 1rem 0.5rem;
+            text-align: center;
+            border-right: 1px solid rgba(0,0,0,0.2);
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+
+        .packet-field:last-child {
+            border-right: none;
+        }
+
+        .packet-bits {
+            font-size: 0.7rem;
+            color: rgba(255,255,255,0.5);
+            margin-bottom: 0.4rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .packet-name {
+            font-weight: 600;
+            color: #fff;
+        }
+
+        .field-8 { flex: 1; background: rgba(56, 189, 248, 0.15); }
+        .field-16 { flex: 2; background: rgba(129, 140, 248, 0.15); }
+        .field-payload { flex: 8; background: rgba(15, 23, 42, 0.6); }
+
         @keyframes fadeInDown {
             from { opacity: 0; transform: translateY(-30px); }
             to { opacity: 1; transform: translateY(0); }
@@ -198,13 +240,22 @@
             <p>Traditional retransmission (NACK) fails in real-time environments due to the speed-of-light delay traversing the network twice. We solve this mathematically using <strong>Forward Error Correction (FEC)</strong>.</p>
             <p>Our specific implementation utilizes an <strong>Interleaved XOR Parity (K=2)</strong> model. For every two data frames, we generate a single parity packet (1.5x bandwidth overhead, well under the 2.0x limit).</p>
             
-            <div class="diagram-container">
-                <div class="mermaid">
-                    packet-beta
-                    0-7: "Type (0x01/0x02)"
-                    8-15: "Stride (S)"
-                    16-31: "Sequence / Base (BE)"
-                    32-1311: "Raw Payload / XOR Parity (160 Bytes)"
+            <div class="packet-diagram">
+                <div class="packet-field field-8">
+                    <div class="packet-bits">8 Bits</div>
+                    <div class="packet-name">Type</div>
+                </div>
+                <div class="packet-field field-8">
+                    <div class="packet-bits">8 Bits</div>
+                    <div class="packet-name">Stride</div>
+                </div>
+                <div class="packet-field field-16">
+                    <div class="packet-bits">16 Bits (BE)</div>
+                    <div class="packet-name">Sequence</div>
+                </div>
+                <div class="packet-field field-payload">
+                    <div class="packet-bits">160 Bytes</div>
+                    <div class="packet-name">Raw Payload / XOR Parity</div>
                 </div>
             </div>
             
