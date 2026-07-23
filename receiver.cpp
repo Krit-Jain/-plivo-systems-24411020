@@ -96,7 +96,10 @@ static void try_deferred_recovery(uint16_t new_seq) {
             recovered = true;  /* both present → parity unneeded, remove */
         }
 
-        if (recovered) {
+        /* Age out stale parities (older than 100 frames / 2 seconds) */
+        bool stale = (uint16_t(new_seq - base) > 100 && uint16_t(new_seq - base) < 30000);
+
+        if (recovered || stale) {
             /* Swap-remove: overwrite with last element */
             parity_store[i] = parity_store[--parity_count];
         } else {
