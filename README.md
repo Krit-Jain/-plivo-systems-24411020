@@ -35,6 +35,7 @@ Naive retransmission (NACKs) violate real-time speed-of-light constraints due to
 1. Parity Generation: Every 2 data frames generate 1 parity packet (P = Frame_A XOR Frame_B).
 2. Burst Protection: We interleave the pairs based on a Stride parameter. If Stride = 2, Frame 0 pairs with Frame 2. A network burst dropping consecutive frames 1 and 2 safely isolates the losses into separate parity groups, allowing full mathematical recovery.
 3. Adaptive Feedback: The receiver monitors network health over 500ms sliding windows. It sends an 8-byte telemetry packet back to the sender, dynamically instructing it to shift between Stride 1 (low delay) and Stride 2 (heavy burst protection) based on real-time packet loss patterns.
+4. Perpetual Ring Buffers: The internal C++ architecture uses modulo-indexed Ring Buffers (`seq % 4096`) with proactive state-clearing, guaranteeing zero-allocation memory safety for infinite streams without overflowing.
 
 ### Wire Protocol
 

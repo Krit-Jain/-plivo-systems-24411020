@@ -78,7 +78,10 @@
     <p>The C++ Receiver maintains a 500ms sliding window, analyzing the exact network burst-loss pattern. Every 500ms, it transmits an ultra-lightweight 8-byte telemetry packet back to the sender. If the network is pristine, the sender dynamically shifts to Stride 1, maximizing available jitter-buffer headroom. If a burst is detected, it shifts to Stride 2 to weather the storm.</p>
 
     <h2>4. C++ Implementation Details & Wire Format</h2>
-    <p>The sender and receiver are engineered in pure C++17. They utilize <code>fcntl(O_NONBLOCK)</code> and strict <code>select()</code> event loops to guarantee the packet intake and processing pipeline is never blocked by socket I/O delays. Memory allocation is static (zero-allocation main loop) to prevent GC pauses.</p>
+    <p>The sender and receiver are engineered in pure C++17. They utilize <code>fcntl(O_NONBLOCK)</code> and strict <code>select()</code> event loops to guarantee the packet intake and processing pipeline is never blocked by socket I/O delays.</p>
+    <div class="highlight">
+        <strong>Memory Architecture (Perpetual Ring Buffers):</strong> To guarantee the endpoints can process infinite real-time streams (e.g., stress tests lasting hours) without crashing or allocating dynamic memory, all internal packet tracking is governed by modulo-indexed ring buffers (<code>seq % 4096</code>). A proactive sweeper constantly zeroes out future memory slots, providing an extremely robust, 0-allocation environment.
+    </div>
 
     <div class="packet-diagram">
         <div class="packet-field field-8">
