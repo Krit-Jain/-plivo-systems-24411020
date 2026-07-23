@@ -1,1 +1,15 @@
-Our system utilizes an Interleaved XOR Forward Error Correction (FEC) mechanism, employing K=2 parity groups (one parity packet per two data frames) to maintain a highly efficient 1.54x bandwidth overhead. To protect against burst losses—the nemesis of real-time UDP—our sender utilizes stride-based interleaving to ensure consecutive network drops land in separate, independently recoverable parity groups. We also leverage the optional feedback path so the receiver can measure the network's burstiness in 500ms sliding windows and dynamically instruct the sender to increase or decrease its interleaving stride. Because increasing the stride mathematically requires a larger jitter buffer to wait for parity partners, we have deliberately designed the system to cap at Stride=2 to guarantee recovery within a predictable time window. **You should grade our system at a delay of 120ms.** This provides exactly enough mathematical headroom for Stride=2 to wait 40ms for its parity partner while still surviving severe 80ms delay jitter spikes. Our design will break if the network exhibits burst losses of 3 or more consecutive packets, or if network jitter exceeds 100ms, as these conditions would push our Stride=2 parity packets past the absolute 120ms deadline.
+# Architectural Notes
+
+1. **Grading Target:** Please evaluate our submission at exactly `delay_ms = 120`. 
+
+2. **Core Design:** Our architecture leverages an Adaptive Interleaved Forward Error Correction (FEC) mechanism using proactive XOR parity (K=2). 
+3. Rather than relying on slow NACK retransmissions, the sender proactively calculates and transmits one parity packet for every two data frames. 
+4. This yields a deterministic `1.54x` bandwidth overhead, successfully avoiding the strict `2.00x` disqualification threshold while granting robust mathematical packet recovery. 
+5. To defend the audio stream against consecutive burst losses, the mathematical parity pairings are interleaved by an adjustable "Stride" parameter.
+
+6. **Adaptive Telemetry:** The receiver continuously monitors incoming packet sequences over a 500ms sliding window to calculate the maximum network burst-loss length. 
+7. It beams this telemetry back to the sender via a lightweight 8-byte UDP packet (`480 bytes/sec` overhead). 
+8. The sender utilizes this telemetry to dynamically shift between Stride 1 (maximizing jitter buffer headroom on clean networks) and Stride 2 (maximizing burst protection on volatile networks).
+
+9. **Failure Conditions:** This architecture will break if a network burst exceeds 2 consecutive packet drops, as our fixed `120ms` delay budget cannot physically accommodate the latency required to wait for Stride 3 parity packets. 
+10. Furthermore, the system will fail if the raw packet loss permanently exceeds 33%, overwhelming the K=2 mathematical recovery capability.
