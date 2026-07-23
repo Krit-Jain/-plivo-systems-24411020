@@ -105,10 +105,25 @@ int main() {
             }
         }
 
-        /* ── Feedback from receiver (drain; processed in Phase 4) ──── */
+        /* ── Feedback from receiver (adaptive stride logic) ──────────── */
         if (FD_ISSET(feedback_fd, &rfds)) {
             ssize_t n;
-            do { n = recv_nb(feedback_fd, recv_buf, sizeof(recv_buf)); }
+            do { 
+                n = recv_nb(feedback_fd, recv_buf, sizeof(recv_buf)); 
+                if (n == FEEDBACK_SIZE && recv_buf[0] == PKT_FEEDBACK) {
+                    uint8_t burst_len = fb_burst_len(recv_buf);
+                    uint16_t loss_count = fb_loss_count(recv_buf);
+                    
+                    /* Adaptive stride selection */
+                    if (burst_len >= 2) {
+                        /* Burst losses detected -> increase protection (cap at 2 to stay under 120ms delay) */
+                        stride = 2;
+                    } else if (loss_count == 0) {
+                        /* Clean network -> reduce delay */
+                        stride = 1;
+                    }
+                }
+            }
             while (n > 0);
         }
     }

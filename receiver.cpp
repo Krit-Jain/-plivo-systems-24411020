@@ -23,11 +23,13 @@
 #include <cstdlib>
 #include <cstring>
 #include <sys/select.h>
+#include <algorithm>
 
 /* ── Frame tracking ────────────────────────────────────────────────────── */
 
 static uint8_t  frame_payloads[MAX_FRAMES][PAYLOAD_BYTES];
 static bool     frame_delivered[MAX_FRAMES];   /* true once forwarded to player */
+static uint16_t highest_seq_received = 0;
 
 /* ── Stored parities for deferred recovery ─────────────────────────────── */
 
@@ -45,7 +47,8 @@ static int            parity_count = 0;
 
 /* ── Deliver a frame to the harness player ─────────────────────────────── */
 
-static int player_fd_g;  /* set once in main() */
+static int player_fd_g;    /* set once in main() */
+static int feedback_fd_g;  /* set once in main() */
 
 static void deliver(uint16_t seq, const uint8_t* payload) {
     if (seq >= MAX_FRAMES || frame_delivered[seq]) return;
@@ -94,6 +97,41 @@ static void try_deferred_recovery(uint16_t new_seq) {
     }
 }
 
+/* ── Feedback generation ───────────────────────────────────────────────── */
+
+static void evaluate_and_send_feedback() {
+    static uint16_t last_eval_seq = 0;
+    
+    /* Need enough history to evaluate, leaving a 20-frame margin for jitter/delay */
+    if (highest_seq_received < 30) return;
+    
+    uint16_t eval_end = highest_seq_received - 20;
+    
+    /* Evaluate every 25 frames */
+    if (eval_end - last_eval_seq >= 25) {
+        uint8_t max_burst = 0;
+        uint8_t current_burst = 0;
+        uint16_t loss_count = 0;
+        uint16_t total = eval_end - last_eval_seq;
+        
+        for (uint16_t s = last_eval_seq; s < eval_end; ++s) {
+            if (!frame_delivered[s]) {
+                current_burst++;
+                loss_count++;
+                if (current_burst > max_burst) max_burst = current_burst;
+            } else {
+                current_burst = 0;
+            }
+        }
+        
+        uint8_t buf[FEEDBACK_SIZE];
+        int len = encode_feedback(buf, max_burst, highest_seq_received, loss_count, total);
+        send_to(feedback_fd_g, buf, len, PORT_RECV_TO_RELAY);
+        
+        last_eval_seq = eval_end;
+    }
+}
+
 /* ── Main ──────────────────────────────────────────────────────────────── */
 
 int main() {
@@ -108,6 +146,7 @@ int main() {
     }
 
     player_fd_g = player_fd;
+    feedback_fd_g = feedback_fd;
     std::memset(frame_delivered, 0, sizeof(frame_delivered));
 
     uint8_t recv_buf[2048];
@@ -133,11 +172,18 @@ int main() {
                         uint16_t seq = parse_seq(recv_buf);
                         const uint8_t* payload = parse_payload(recv_buf);
 
+                        if (seq > highest_seq_received && seq < MAX_FRAMES) {
+                            highest_seq_received = seq;
+                        }
+
                         /* Forward immediately — zero buffering */
                         deliver(seq, payload);
 
                         /* Check stored parities for deferred recovery */
                         try_deferred_recovery(seq);
+                        
+                        /* Periodically send feedback based on received sequence */
+                        evaluate_and_send_feedback();
 
                     } else if (type == PKT_PARITY && n == PACKET_SIZE) {
                         uint16_t base_seq = parse_seq(recv_buf);
