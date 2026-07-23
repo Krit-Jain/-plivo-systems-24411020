@@ -74,11 +74,16 @@ int main() {
                     uint16_t seq    = static_cast<uint16_t>(seq32);
                     const uint8_t* payload = parse_harness_payload(recv_buf);
 
+                    /* Map seq to ring buffer index */
+                    uint16_t idx = seq % MAX_FRAMES;
+
                     /* Store payload for parity computation */
-                    if (seq < MAX_FRAMES) {
-                        std::memcpy(frame_payloads[seq], payload, PAYLOAD_BYTES);
-                        frame_stored[seq] = true;
-                    }
+                    std::memcpy(frame_payloads[idx], payload, PAYLOAD_BYTES);
+                    frame_stored[idx] = true;
+                    
+                    /* Proactively clear the future slot exactly halfway across the ring to prevent corruption on the next lap */
+                    uint16_t clear_idx = (seq + (MAX_FRAMES / 2)) % MAX_FRAMES;
+                    frame_stored[clear_idx] = false;
 
                     /* Send DATA packet to relay */
                     int len = encode_data(send_buf, seq, stride, payload);
@@ -87,17 +92,17 @@ int main() {
                     /* If this is the "late" frame in a pair, emit PARITY */
                     if (is_parity_trigger(seq, stride)) {
                         int partner = compute_partner(seq, stride);
-                        if (partner >= 0 && partner < MAX_FRAMES
-                                && frame_stored[partner]) {
-                            uint8_t parity_payload[PAYLOAD_BYTES];
-                            xor_payloads(parity_payload,
-                                         frame_payloads[seq],
-                                         frame_payloads[partner]);
-                            uint16_t base = parity_base_seq(seq, stride);
-                            int plen = encode_parity(send_buf, base, stride,
-                                                     parity_payload);
-                            send_to(relay_fd, send_buf, plen,
-                                    PORT_SEND_TO_RELAY);
+                        if (partner >= 0) {
+                            uint16_t p_idx = partner % MAX_FRAMES;
+                            if (frame_stored[p_idx]) {
+                                uint8_t parity_payload[PAYLOAD_BYTES];
+                                xor_payloads(parity_payload,
+                                             frame_payloads[idx],
+                                             frame_payloads[p_idx]);
+                                uint16_t base = parity_base_seq(seq, stride);
+                                int plen = encode_parity(send_buf, base, stride, parity_payload);
+                                send_to(relay_fd, send_buf, plen, PORT_SEND_TO_RELAY);
+                            }
                         }
                     }
                 }

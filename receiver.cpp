@@ -51,10 +51,15 @@ static int player_fd_g;    /* set once in main() */
 static int feedback_fd_g;  /* set once in main() */
 
 static void deliver(uint16_t seq, const uint8_t* payload) {
-    if (seq >= MAX_FRAMES || frame_delivered[seq]) return;
+    uint16_t idx = seq % MAX_FRAMES;
+    if (frame_delivered[idx]) return;
 
-    frame_delivered[seq] = true;
-    std::memcpy(frame_payloads[seq], payload, PAYLOAD_BYTES);
+    frame_delivered[idx] = true;
+    std::memcpy(frame_payloads[idx], payload, PAYLOAD_BYTES);
+    
+    /* Proactively clear the future slot exactly halfway across the ring to prevent corruption */
+    uint16_t clear_idx = (seq + (MAX_FRAMES / 2)) % MAX_FRAMES;
+    frame_delivered[clear_idx] = false;
 
     uint8_t buf[HARNESS_PACKET_SIZE];
     encode_harness(buf, static_cast<uint32_t>(seq), payload);
@@ -69,19 +74,22 @@ static void try_deferred_recovery(uint16_t new_seq) {
         uint16_t base    = sp.base_seq;
         uint16_t partner = base + sp.stride;
 
-        bool have_base    = (base    < MAX_FRAMES) && frame_delivered[base];
-        bool have_partner = (partner < MAX_FRAMES) && frame_delivered[partner];
+        uint16_t b_idx = base % MAX_FRAMES;
+        uint16_t p_idx = partner % MAX_FRAMES;
+
+        bool have_base    = frame_delivered[b_idx];
+        bool have_partner = frame_delivered[p_idx];
 
         bool recovered = false;
 
-        if (new_seq == base && have_base && !have_partner && partner < MAX_FRAMES) {
+        if (new_seq == base && have_base && !have_partner) {
             uint8_t rec[PAYLOAD_BYTES];
-            xor_payloads(rec, sp.payload, frame_payloads[base]);
+            xor_payloads(rec, sp.payload, frame_payloads[b_idx]);
             deliver(partner, rec);
             recovered = true;
-        } else if (new_seq == partner && have_partner && !have_base && base < MAX_FRAMES) {
+        } else if (new_seq == partner && have_partner && !have_base) {
             uint8_t rec[PAYLOAD_BYTES];
-            xor_payloads(rec, sp.payload, frame_payloads[partner]);
+            xor_payloads(rec, sp.payload, frame_payloads[p_idx]);
             deliver(base, rec);
             recovered = true;
         } else if (have_base && have_partner) {
@@ -114,8 +122,8 @@ static void evaluate_and_send_feedback() {
         uint16_t loss_count = 0;
         uint16_t total = eval_end - last_eval_seq;
         
-        for (uint16_t s = last_eval_seq; s < eval_end; ++s) {
-            if (!frame_delivered[s]) {
+        for (uint16_t s = last_eval_seq; s != eval_end; ++s) {
+            if (!frame_delivered[s % MAX_FRAMES]) {
                 current_burst++;
                 loss_count++;
                 if (current_burst > max_burst) max_burst = current_burst;
@@ -172,7 +180,8 @@ int main() {
                         uint16_t seq = parse_seq(recv_buf);
                         const uint8_t* payload = parse_payload(recv_buf);
 
-                        if (seq > highest_seq_received && seq < MAX_FRAMES) {
+                        /* Handle uint16_t sequence wrap-around */
+                        if (uint16_t(seq - highest_seq_received) < 30000) {
                             highest_seq_received = seq;
                         }
 
@@ -191,20 +200,22 @@ int main() {
                         const uint8_t* pp = parse_payload(recv_buf);
                         uint16_t partner  = base_seq + stride;
 
-                        if (base_seq < MAX_FRAMES && partner < MAX_FRAMES) {
-                            bool hb = frame_delivered[base_seq];
-                            bool hp = frame_delivered[partner];
+                        uint16_t b_idx = base_seq % MAX_FRAMES;
+                        uint16_t p_idx = partner % MAX_FRAMES;
 
-                            if (hb && !hp) {
-                                /* Recover partner */
-                                uint8_t rec[PAYLOAD_BYTES];
-                                xor_payloads(rec, pp, frame_payloads[base_seq]);
-                                deliver(partner, rec);
-                            } else if (!hb && hp) {
-                                /* Recover base */
-                                uint8_t rec[PAYLOAD_BYTES];
-                                xor_payloads(rec, pp, frame_payloads[partner]);
-                                deliver(base_seq, rec);
+                        bool hb = frame_delivered[b_idx];
+                        bool hp = frame_delivered[p_idx];
+
+                        if (hb && !hp) {
+                            /* Recover partner */
+                            uint8_t rec[PAYLOAD_BYTES];
+                            xor_payloads(rec, pp, frame_payloads[b_idx]);
+                            deliver(partner, rec);
+                        } else if (!hb && hp) {
+                            /* Recover base */
+                            uint8_t rec[PAYLOAD_BYTES];
+                            xor_payloads(rec, pp, frame_payloads[p_idx]);
+                            deliver(base_seq, rec);
                             } else if (!hb && !hp) {
                                 /* Both missing — store for deferred recovery */
                                 if (parity_count < MAX_STORED_PARITY) {
@@ -215,7 +226,6 @@ int main() {
                                 }
                             }
                             /* both present → discard parity silently */
-                        }
                     }
                 }
                 n = recv_nb(relay_fd, recv_buf, sizeof(recv_buf));
